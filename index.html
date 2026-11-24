@@ -63,7 +63,14 @@ async function api(action, data = {}) {
   try {
     const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action, idToken: liff.getIDToken(), ...data }) });
     const j = await res.json();
-    if (j.auth) { liff.logout(); liff.login(); }
+        if (j.auth) {
+      let tried = false; try { tried = sessionStorage.getItem('relogin') === '1'; } catch (_) {}
+      if (!tried) { try { sessionStorage.setItem('relogin', '1'); } catch (_) {} liff.logout(); liff.login(); return { ok: false, msg: 'ログインし直しています…' }; }
+      return { ok: false, msg: liff.getIDToken()
+        ? 'LINEの本人確認に失敗しました。GASのスクリプトプロパティ LOGIN_CHANNEL_ID が、LIFFを作ったLINEログインチャネルのチャネルIDと同じか確認してください'
+        : 'LINEのIDトークンを取得できません。LIFFの設定で Scope の「openid」にチェックを入れてください' };
+    }
+    try { sessionStorage.removeItem('relogin'); } catch (_) {}
     return j;
   } catch (e) {
     return { ok: false, msg: '通信できませんでした。電波の良い所でもう一度お試しください' };
