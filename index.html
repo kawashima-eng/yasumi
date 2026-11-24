@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>休み希望</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{--bg:#fff;--ink:#0b0b10;--mute:#59625e;--line:#e2e8e4;--acc:#06c755;--soft:#eafaf0;--card:#f5f8f6;--warn:#b42318;--warnS:#fdecea;--sun:#c0362c;--sat:#1d4ed8}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+header{background:var(--acc);color:#fff;padding:14px 16px}
+header h1{margin:0;font-size:20px}
+main{max-width:640px;margin:0 auto;padding:12px 12px 60px}
+h2{font-size:17px;margin:24px 0 8px}
+.months{display:flex;gap:6px;overflow-x:auto}
+.months button{flex:none;border:1px solid var(--line);border-radius:999px;padding:8px 14px;min-height:40px;font:inherit;background:var(--card);color:var(--ink)}
+.months button[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+.stat{background:var(--card);border-radius:10px;padding:8px 10px}
+.stat small{display:block;color:var(--mute);font-size:12px}
+.stat b{font-size:22px}
+.note{background:var(--soft);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:14px}
+.note.w{background:var(--warnS);color:var(--warn)}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:10px}
+.dow{text-align:center;font-size:12px;color:var(--mute)}
+.day{min-height:58px;border:1px solid var(--line);border-radius:8px;padding:4px;background:#fff;color:var(--ink);font:inherit;text-align:left;display:flex;flex-direction:column;justify-content:space-between}
+.day .d{font-weight:700}.day .s{font-size:11px;color:var(--mute);line-height:1.2}
+.day.sun .d{color:var(--sun)}.day.sat .d{color:var(--sat)}
+.day.mine{background:var(--acc);border-color:var(--acc)}.day.mine .d,.day.mine .s{color:#fff}
+.day.pend{background:var(--soft);border-color:var(--acc)}
+.day.full{background:var(--card)}.day.full .s{color:var(--warn)}
+.day.off{opacity:.45}.day.blank{border:0;background:none}
+.item{border-bottom:1px solid var(--line);padding:10px 0}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+button.b{font:inherit;font-size:15px;min-height:40px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.x{color:var(--warn)}
+input,select{font:inherit;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;min-height:40px}
+.muted{color:var(--mute);font-size:13px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;max-width:90vw;display:none}
+#busy{position:fixed;inset:0;background:rgba(255,255,255,.5);display:none}
+</style></head><body>
+<header><h1>休み希望</h1></header>
+<main id="app"><p class="muted">読み込み中…</p></main>
+<div id="busy"></div><div id="toast" role="status"></div>
+<script>
+{
+/* ▼ ここを書き換える ▼ */
+const LIFF_ID = 'ここにLIFF ID（値B）';
+const GAS_URL = 'ここにGASのWebアプリURL';
+/* ▲ ここまで ▲ */
+
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const ymShift = (ym, n) => { const [y, m] = ym.split('-').map(Number), d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
+const mL = ym => Number(ym.slice(5)) + '月';
+const dL = s => { const d = new Date(s + 'T12:00:00'); return (d.getMonth() + 1) + '月' + d.getDate() + '日（' + '日月火水木金土'[d.getDay()] + '）'; };
+let tt; const toast = m => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(tt); tt = setTimeout(() => t.style.display = 'none', 3500); };
+const thisYm = (() => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1); })();
+let S = null, month = ymShift(thisYm, 1);
+
+async function api(action, data = {}) {
+  $('#busy').style.display = 'block';
+  try {
+    const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action, idToken: liff.getIDToken(), ...data }) });
+    const j = await res.json();
+    if (j.auth) { liff.logout(); liff.login(); }
+    return j;
+  } catch (e) {
+    return { ok: false, msg: '通信できませんでした。電波の良い所でもう一度お試しください' };
+  } finally { $('#busy').style.display = 'none'; }
+}
+async function load() {
+  const j = await api('state', { month });
+  if (!j.ok) { $('#app').innerHTML = `<div class="note w">${esc(j.msg)}</div>`; return; }
+  S = j; render();
+}
+async function act(action, data) {
+  const j = await api(action, data);
+  toast(j.msg || (j.ok ? '完了しました' : 'できませんでした'));
+  await load();
+}
+
+function render() {
+  if (!S.registered) {
+    $('#app').innerHTML = `<h2>はじめに名前を登録してください</h2><p class="muted">管理者がわかるフルネームを入れてください。</p>
+      <form id="nameF" class="row"><input id="nameI" maxlength="30" placeholder="例：山田 太郎" required><button class="b p">登録</button></form>`;
+    return;
+  }
+  const ph = S.phase, months = [1, 2, 3].map(n => ymShift(thisYm, n));
+  const msg = {
+    before: `${mL(S.month)}分の受付は ${ph.es} から始まります（ランク${esc(S.rank)}）。`,
+    early: `先行予約の受付中です。1日あたり${S.early}人まで先着で確定します。通常受付は ${ph.ns}〜${ph.ne} です。`,
+    normal: `通常受付中です。${ph.ne} までは取り消しできます。`,
+    locked: `受付は締め切りました。休みを返す場合は下の一覧から「返却」を申請してください（承認後 ${S.yen.toLocaleString()}円）。`,
+  }[ph.p];
+  const open = ph.p === 'early' || ph.p === 'normal';
+  const [y, m] = S.month.split('-').map(Number), first = new Date(y, m - 1, 1).getDay();
+  let cal = '<div class="cal">' + '日月火水木金土'.split('').map(w => `<div class="dow">${w}</div>`).join('') + '<div class="day blank"></div>'.repeat(first);
+  S.days.forEach((d, i) => {
+    const wd = (first + i) % 7, past = d.date <= S.today;
+    let cls = 'day' + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''), s, a = '';
+    if (d.mine) { cls += d.pending ? ' pend' : ' mine'; s = d.pending ? '申請中' : '休み確定'; if (open) a = 'cancel'; }
+    else if (d.left <= 0) { cls += ' full'; s = ph.p === 'early' && d.early ? '先行枠 満' : '満'; }
+    else { s = '残り ' + d.left; if (open && !past) a = 'book'; }
+    if (past) cls += ' off';
+    cal += `<button class="${cls}" ${a ? `data-a="${a}" data-v="${esc(d.date)}"` : 'disabled'}><span class="d">${i + 1}</span><span class="s">${s}</span></button>`;
+  });
+  cal += '</div>';
+  const st = S.stat.days === '' ? '実績未登録' : `${mL(S.stat.month)}：出勤${esc(S.stat.days)}日・${esc(S.stat.areas || 0)}エリア`;
+  const drv = S.drivers.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+  const list = S.hol.length ? S.hol.map(h => {
+    let ops = '';
+    if (open) ops = `<button class="b x" data-a="cancel" data-v="${esc(h.date)}">取り消す</button>`;
+    else if (h.pending) ops = '<span class="muted">承認待ち</span>';
+    else if (h.date > S.today) ops = `<button class="b" data-a="giveBack" data-v="${esc(h.date)}">返却（${S.yen.toLocaleString()}円）</button>` +
+      (drv ? `<select id="to-${esc(h.date)}"><option value="">譲渡先</option>${drv}</select><button class="b" data-a="transfer" data-v="${esc(h.date)}">譲渡を申請</button>` : '');
+    return `<div class="item"><b>${dL(h.date)}</b> <span class="muted">${esc(h.kind)}</span><div class="row">${ops}</div></div>`;
+  }).join('') : '<p class="muted">まだありません。カレンダーの日付を押すと申請できます。</p>';
+  const reqs = S.reqs.length ? `<h2>返却・譲渡の申請</h2>` + S.reqs.map(r => `<div class="item">${dL(r.date)}　${esc(r.type)}${r.to ? ' → ' + esc(r.to) : ''}　<b>${esc(r.status)}</b>${r.status === '承認待ち' ? ` <button class="b" data-a="withdraw" data-v="${esc(r.id)}">取り下げ</button>` : ''}</div>`).join('') : '';
+  $('#app').innerHTML = `<div class="months">${months.map(x => `<button data-m="${x}" aria-pressed="${x === S.month}">${Number(x.slice(0, 4))}年${mL(x)}</button>`).join('')}</div>
+    <div class="strip">
+      <div class="stat"><small>ランク</small><b>${esc(S.rank)}</b><small>${st}</small></div>
+      <div class="stat"><small>休み希望</small><b>${S.used}/${S.limit}</b><small>${S.bonus ? '追加枠+' + S.bonus + 'を含む' : '日'}</small></div>
+      <div class="stat"><small>稼働希望</small><select id="wk" aria-label="週の稼働希望日数"><option value="">週◯日</option>${[1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${S.weekly === n ? 'selected' : ''}>週${n}日</option>`).join('')}</select></div>
+    </div>
+    <div class="note ${open ? '' : 'w'}">${msg}</div>${cal}
+    <h2>${mL(S.month)}のあなたの休み</h2>${list}${reqs}
+    <p class="muted" style="margin-top:24px">${esc(S.name)}さんとしてログイン中</p>`;
+}
+
+document.addEventListener('click', async e => {
+  const mb = e.target.closest('[data-m]');
+  if (mb) { month = mb.dataset.m; return load(); }
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const a = b.dataset.a, v = b.dataset.v;
+  if (a === 'book') return act('book', { date: v });
+  if (a === 'cancel') return act('cancel', { date: v });
+  if (a === 'giveBack') return act('giveBack', { date: v });
+  if (a === 'withdraw') return act('withdraw', { id: v });
+  if (a === 'transfer') { const to = document.getElementById('to-' + v)?.value; if (!to) return toast('譲渡先を選んでください'); return act('transfer', { date: v, to }); }
+});
+document.addEventListener('change', e => { if (e.target.id === 'wk' && e.target.value) act('weekly', { month: S.month, days: e.target.value }); });
+document.addEventListener('submit', e => { if (e.target.id !== 'nameF') return; e.preventDefault(); const n = $('#nameI').value.trim(); if (n) act('register', { name: n }); });
+
+liff.init({ liffId: LIFF_ID }).then(() => {
+  if (!liff.isLoggedIn()) return liff.login();
+  load();
+}).catch(err => { $('#app').innerHTML = `<div class="note w">LINEの初期化に失敗しました：${esc(err.message)}</div>`; });
+}
+</script>
+</body></html>
